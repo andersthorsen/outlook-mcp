@@ -122,9 +122,9 @@ A comprehensive MCP (Model Context Protocol) server that connects Claude with Mi
 
 1. **Install dependencies**: `npm install`
 2. **Azure setup**: Register app in Azure Portal (see detailed steps below)
-3. **Configure environment**: Copy `.env.example` to `.env` and add your Azure credentials
+3. **Configure environment**: Set `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
 4. **Configure Claude**: Update your Claude Desktop config with the server path
-5. **Authenticate**: Use the `authenticate` tool in Claude, open the returned Microsoft sign-in URL, and complete the login
+5. **Authenticate**: Use the `authenticate` tool in Claude — for device code flow (`AUTH_FLOW=device_code`), enter the returned code at microsoft.com/devicelogin; for authorization code flow (default), open the returned Microsoft sign-in URL and complete the login
 6. **Start using**: Access your M365 data through Claude!
 
 ## Installation
@@ -222,7 +222,21 @@ Add to your Claude Desktop config:
 
 ## Authentication
 
-### Graph API (Outlook + OneDrive)
+Two authentication flows are supported. Set `AUTH_FLOW` to choose:
+
+### Device Code Flow (recommended for Docker)
+
+Set `AUTH_FLOW=device_code`. No port exposure or browser redirects needed.
+
+1. Use the `authenticate` tool — it returns a code and URL
+2. Go to `https://microsoft.com/devicelogin` in any browser and enter the code
+3. Tokens saved to `~/.outlook-mcp-tokens.json`
+
+**Azure requirement:** In your app registration, go to **Authentication** > **Settings** and set **Allow public client flows** to **Yes**.
+
+### Authorization Code Flow (default)
+
+Set `AUTH_FLOW=authorization_code` (or leave unset).
 
 1. Use the `authenticate` tool in Claude — it returns a Microsoft sign-in URL and starts a temporary OAuth callback listener on port 3333 (5-minute window)
 2. Open the URL in your browser and sign in; the callback is handled by the MCP server itself
@@ -232,6 +246,10 @@ Add to your Claude Desktop config:
 If the server runs in a container, publish the callback port (3333 by default) to the host so the browser redirect can reach it.
 
 `npm run auth-server` still starts the standalone auth server (visit `http://localhost:3333/auth`) as a fallback; it shares the same configuration and token file.
+
+### Token Refresh
+
+Tokens are automatically refreshed when they expire (5-minute buffer). The refresh token is valid for ~90 days. Re-authentication is only needed when the refresh token itself expires.
 
 ### Power Automate (Optional)
 

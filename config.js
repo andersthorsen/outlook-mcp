@@ -33,6 +33,9 @@ module.exports = {
   // Test mode setting
   USE_TEST_MODE: process.env.USE_TEST_MODE === 'true',
 
+  // Authentication flow: 'device_code' or 'authorization_code' (default)
+  AUTH_FLOW: process.env.AUTH_FLOW || 'authorization_code',
+
   // Authentication configuration. Client credentials accept both env-var
   // namespaces: MS_* (.env / auth server) and OUTLOOK_* (MCP client config).
   AUTH_CONFIG: {
@@ -63,7 +66,13 @@ module.exports = {
   MAX_RESULT_COUNT: 50,
 
   // Timezone
+  // Windows timezone for creating events via Graph API
   DEFAULT_TIMEZONE: "Central European Standard Time",
+  // IANA timezone for display (used in Prefer: outlook.timezone header)
+  // Set OUTLOOK_TIMEZONE env var (e.g. "Europe/Oslo") to send the
+  // Prefer: outlook.timezone header with calendar requests.
+  // When empty, times are returned in UTC.
+  DISPLAY_TIMEZONE: process.env.OUTLOOK_TIMEZONE || "",
 
   // OneDrive constants
   ONEDRIVE_SELECT_FIELDS: 'id,name,size,lastModifiedDateTime,webUrl,folder,file,parentReference',

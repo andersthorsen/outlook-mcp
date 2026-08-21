@@ -32,6 +32,7 @@ async function ensureAuthenticated() {
 
 module.exports = {
   tokenManager,
+  tokenStorage,
   authTools,
   ensureAuthenticated
 };
