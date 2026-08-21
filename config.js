@@ -7,30 +7,50 @@ const os = require('os');
 // Ensure we have a home directory path even if process.env.HOME is undefined
 const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir() || '/tmp';
 
+// Single source of truth for OAuth scopes; must cover every Graph call the tools make.
+const DEFAULT_SCOPES = [
+  'offline_access',
+  'User.Read',
+  'Mail.Read',
+  'Mail.ReadWrite',
+  'Mail.Send',
+  'Calendars.Read',
+  'Calendars.ReadWrite',
+  'Files.Read',
+  'Files.ReadWrite',
+  'Contacts.Read'
+];
+
+const tenantId = process.env.MS_TENANT_ID || 'common';
+const authorityHost = (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(/\/+$/, '');
+const authPort = parseInt(process.env.MS_AUTH_PORT, 10) || 3333;
+
 module.exports = {
   // Server information
   SERVER_NAME: "m365-assistant",
   SERVER_VERSION: "2.0.0",
-  
+
   // Test mode setting
   USE_TEST_MODE: process.env.USE_TEST_MODE === 'true',
-  
-  // Authentication configuration
+
+  // Authentication configuration. Client credentials accept both env-var
+  // namespaces: MS_* (.env / auth server) and OUTLOOK_* (MCP client config).
   AUTH_CONFIG: {
-    clientId: process.env.OUTLOOK_CLIENT_ID || '',
-    clientSecret: process.env.OUTLOOK_CLIENT_SECRET || '',
-    redirectUri: 'http://localhost:3333/auth/callback',
-    scopes: ['Mail.Read', 'Mail.ReadWrite', 'Mail.Send', 'User.Read', 'Calendars.Read', 'Calendars.ReadWrite', 'Files.Read', 'Files.ReadWrite'],
-    tokenStorePath: path.join(homeDir, '.outlook-mcp-tokens.json'),
-    authServerUrl: 'http://localhost:3333'
+    clientId: process.env.MS_CLIENT_ID || process.env.OUTLOOK_CLIENT_ID || '',
+    clientSecret: process.env.MS_CLIENT_SECRET || process.env.OUTLOOK_CLIENT_SECRET || '',
+    tenantId,
+    authorityHost,
+    authPort,
+    redirectUri: process.env.MS_REDIRECT_URI || `http://localhost:${authPort}/auth/callback`,
+    authEndpoint: process.env.MS_AUTH_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/authorize`,
+    tokenEndpoint: process.env.MS_TOKEN_ENDPOINT || `${authorityHost}/${tenantId}/oauth2/v2.0/token`,
+    scopes: process.env.MS_SCOPES ? process.env.MS_SCOPES.split(' ') : DEFAULT_SCOPES,
+    tokenStorePath: path.join(homeDir, '.outlook-mcp-tokens.json')
   },
   
   // Microsoft Graph API
   GRAPH_API_ENDPOINT: 'https://graph.microsoft.com/v1.0/',
   
-  // Calendar constants
-  CALENDAR_SELECT_FIELDS: 'id,subject,start,end,location,bodyPreview,isAllDay,recurrence,attendees',
-
   // Email constants
   EMAIL_SELECT_FIELDS: 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,hasAttachments,importance,isRead',
   EMAIL_DETAIL_FIELDS: 'id,subject,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,bodyPreview,body,hasAttachments,importance,isRead,internetMessageHeaders',

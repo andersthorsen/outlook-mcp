@@ -124,9 +124,8 @@ A comprehensive MCP (Model Context Protocol) server that connects Claude with Mi
 2. **Azure setup**: Register app in Azure Portal (see detailed steps below)
 3. **Configure environment**: Copy `.env.example` to `.env` and add your Azure credentials
 4. **Configure Claude**: Update your Claude Desktop config with the server path
-5. **Start auth server**: `npm run auth-server`
-6. **Authenticate**: Use the authenticate tool in Claude to get the OAuth URL
-7. **Start using**: Access your M365 data through Claude!
+5. **Authenticate**: Use the `authenticate` tool in Claude, open the returned Microsoft sign-in URL, and complete the login
+6. **Start using**: Access your M365 data through Claude!
 
 ## Installation
 
@@ -164,6 +163,7 @@ npm install
    - `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`
    - `Calendars.Read`, `Calendars.ReadWrite`
    - `Files.Read`, `Files.ReadWrite`
+   - `Contacts.Read`
 4. Click "Add permissions"
 
 **For Power Automate** (optional):
@@ -195,9 +195,9 @@ USE_TEST_MODE=false
 ```
 
 **Important Notes:**
-- Use `MS_CLIENT_ID` and `MS_CLIENT_SECRET` in the `.env` file
+- `MS_CLIENT_ID`/`MS_CLIENT_SECRET` and `OUTLOOK_CLIENT_ID`/`OUTLOOK_CLIENT_SECRET` are interchangeable — every process reads both, `MS_*` wins when both are set
 - Set `MS_TENANT_ID` for single-tenant apps to avoid `/common` endpoint errors
-- For Claude Desktop config, you'll use `OUTLOOK_CLIENT_ID` and `OUTLOOK_CLIENT_SECRET`
+- Set `MS_AUTH_PORT` to move the OAuth callback server off port 3333 (register the matching redirect URI in Azure)
 - Always use the client secret **VALUE**, never the Secret ID
 
 ### 2. Claude Desktop Configuration
@@ -224,10 +224,14 @@ Add to your Claude Desktop config:
 
 ### Graph API (Outlook + OneDrive)
 
-1. Start auth server: `npm run auth-server`
-2. Use the `authenticate` tool in Claude
-3. Visit the provided URL and sign in
-4. Tokens saved to `~/.outlook-mcp-tokens.json`
+1. Use the `authenticate` tool in Claude — it returns a Microsoft sign-in URL and starts a temporary OAuth callback listener on port 3333 (5-minute window)
+2. Open the URL in your browser and sign in; the callback is handled by the MCP server itself
+3. Tokens are saved to `~/.outlook-mcp-tokens.json` and refreshed automatically
+4. Use `check-auth-status` to verify; use `authenticate` with `force: true` to switch accounts or grant new scopes
+
+If the server runs in a container, publish the callback port (3333 by default) to the host so the browser redirect can reach it.
+
+`npm run auth-server` still starts the standalone auth server (visit `http://localhost:3333/auth`) as a fallback; it shares the same configuration and token file.
 
 ### Power Automate (Optional)
 

@@ -1,3 +1,8 @@
+// Mock HOME before loading config (via token-storage) so the default token
+// path is computed from the mocked home directory.
+const mockHomeDir = '/mock/home';
+process.env.HOME = mockHomeDir;
+
 const fs = require('fs').promises;
 const https = require('https');
 const path = require('path');
@@ -12,9 +17,6 @@ jest.mock('fs', () => ({
   }
 }));
 jest.mock('https');
-
-const mockHomeDir = '/mock/home';
-process.env.HOME = mockHomeDir; // Mock HOME for token path
 
 const baseConfig = {
   clientId: 'test-client-id',
@@ -47,7 +49,7 @@ describe('TokenStorage', () => {
     it('should warn if client ID or secret is missing', () => {
       const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
       new TokenStorage({ ...baseConfig, clientId: null });
-      expect(consoleWarnSpy).toHaveBeenCalledWith("TokenStorage: MS_CLIENT_ID or MS_CLIENT_SECRET is not configured. Token operations might fail.");
+      expect(consoleWarnSpy).toHaveBeenCalledWith("TokenStorage: Client ID or Secret is not configured (checked MS_CLIENT_ID/OUTLOOK_CLIENT_ID). Token refresh will fail.");
       consoleWarnSpy.mockRestore();
     });
   });
@@ -63,13 +65,13 @@ describe('TokenStorage', () => {
     });
 
     it('should return null and log if file does not exist (ENOENT)', async () => {
-      const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
       fs.readFile.mockRejectedValue({ code: 'ENOENT' });
       const loaded = await tokenStorage._loadTokensFromFile();
       expect(loaded).toBeNull();
       expect(tokenStorage.tokens).toBeNull();
-      expect(consoleLogSpy).toHaveBeenCalledWith('Token file not found. No tokens loaded.');
-      consoleLogSpy.mockRestore();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Token file not found. No tokens loaded.');
+      consoleErrorSpy.mockRestore();
     });
 
     it('should return null and log error for other read errors', async () => {
@@ -343,6 +345,7 @@ describe('TokenStorage', () => {
         const requestBody = querystring.parse(mockHttpsRequest.write.mock.calls[0][0]);
         expect(requestBody.grant_type).toBe('refresh_token');
         expect(requestBody.refresh_token).toBe('valid_refresh_token');
+        expect(requestBody.scope).toBe(baseConfig.scopes.join(' ')); // Same scopes as the original grant
     });
 
     it('should reject if saving refreshed token fails', async () => {
@@ -407,6 +410,7 @@ describe('TokenStorage', () => {
         mockHttpsRequest.callback(mockRes);
 
         await expect(refreshPromise).rejects.toThrow(errorResponse.error_description);
+        await expect(refreshPromise).rejects.toMatchObject({ oauthError: 'invalid_grant' });
         expect(tokenStorage._refreshPromise).toBeNull();
     });
 
@@ -467,29 +471,36 @@ describe('TokenStorage', () => {
         expect(token).toBe('refreshed_token_from_spy');
     });
 
-    it('should return null and clear tokens if refresh fails', async () => {
-        tokenStorage.tokens = {
+    it('should return null and keep tokens on transient refresh failure', async () => {
+        const storedTokens = {
             access_token: 'expired_token_will_fail',
             refresh_token: 'will_fail_refresh',
             expires_at: Date.now() - 1000
         };
-        jest.spyOn(tokenStorage, 'refreshAccessToken').mockRejectedValue(new Error('Refresh failed'));
-        const saveSpy = jest.spyOn(tokenStorage, '_saveTokensToFile');
+        tokenStorage.tokens = storedTokens;
+        jest.spyOn(tokenStorage, 'refreshAccessToken').mockRejectedValue(new Error('Network down'));
 
         const token = await tokenStorage.getValidAccessToken();
         expect(token).toBeNull();
-        expect(tokenStorage.tokens).toBeNull(); // Tokens should be invalidated
-        expect(saveSpy).toHaveBeenCalled(); // Invalidation should be persisted
+        expect(tokenStorage.tokens).toEqual(storedTokens); // Retained so the next call can retry
+        expect(fs.unlink).not.toHaveBeenCalled();
     });
 
-    it('should propagate error if saving nulled token fails after refresh failure', async () => {
-        tokenStorage.tokens = { access_token: 'expired_token_save_fail', refresh_token: 'refresh_me', expires_at: Date.now() - 1000 };
-        jest.spyOn(tokenStorage, 'refreshAccessToken').mockRejectedValue(new Error('Refresh API down'));
-        const saveError = new Error('Disk write error during null save');
-        jest.spyOn(tokenStorage, '_saveTokensToFile').mockRejectedValueOnce(saveError); // This is key
+    it('should clear tokens when refresh fails with a fatal OAuth error', async () => {
+        tokenStorage.tokens = {
+            access_token: 'expired_token_dead_grant',
+            refresh_token: 'revoked_refresh',
+            expires_at: Date.now() - 1000
+        };
+        const fatalError = new Error('Refresh token expired');
+        fatalError.oauthError = 'invalid_grant';
+        jest.spyOn(tokenStorage, 'refreshAccessToken').mockRejectedValue(fatalError);
+        fs.unlink.mockResolvedValue();
 
-        await expect(tokenStorage.getValidAccessToken()).rejects.toThrow(saveError);
-        expect(tokenStorage.tokens).toBeNull(); // Still nulled in memory
+        const token = await tokenStorage.getValidAccessToken();
+        expect(token).toBeNull();
+        expect(tokenStorage.tokens).toBeNull();
+        expect(fs.unlink).toHaveBeenCalledWith(tokenStorePath);
     });
 
     it('should return null and clear tokens if expired and no refresh token', async () => {
@@ -498,24 +509,15 @@ describe('TokenStorage', () => {
             expires_at: Date.now() - 1000
             // No refresh_token
         };
-        const saveSpy = jest.spyOn(tokenStorage, '_saveTokensToFile').mockResolvedValue(true); // Assume save works for this path
+        fs.unlink.mockResolvedValue();
         const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
 
         const token = await tokenStorage.getValidAccessToken();
         expect(token).toBeNull();
         expect(consoleWarnSpy).toHaveBeenCalledWith('No refresh token available. Cannot refresh access token.');
         expect(tokenStorage.tokens).toBeNull();
-        expect(saveSpy).toHaveBeenCalled();
+        expect(fs.unlink).toHaveBeenCalledWith(tokenStorePath);
         consoleWarnSpy.mockRestore();
-    });
-
-    it('should propagate error if saving nulled token fails (no refresh token path)', async () => {
-        tokenStorage.tokens = { access_token: 'expired_no_refresh_save_fail', expires_at: Date.now() - 1000 };
-        const saveError = new Error('Disk write error during null save (no-refresh path)');
-        jest.spyOn(tokenStorage, '_saveTokensToFile').mockRejectedValueOnce(saveError);
-
-        await expect(tokenStorage.getValidAccessToken()).rejects.toThrow(saveError);
-        expect(tokenStorage.tokens).toBeNull(); // Still nulled in memory
     });
 
     it('should return null if no tokens are loaded initially', async () => {
@@ -541,12 +543,12 @@ describe('TokenStorage', () => {
 
     it('should log if token file does not exist during unlink', async () => {
       fs.unlink.mockRejectedValue({ code: 'ENOENT' });
-      const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation();
 
       await tokenStorage.clearTokens();
 
-      expect(consoleLogSpy).toHaveBeenCalledWith('Token file not found, nothing to delete.');
-      consoleLogSpy.mockRestore();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Token file not found, nothing to delete.');
+      consoleErrorSpy.mockRestore();
     });
 
     it('should log error for other unlink errors', async () => {

@@ -1,0 +1,91 @@
+name: outlook-mcp
+description: Microsoft Outlook email, calendar, and OneDrive via MCP
+upstream: https://github.com/ryaker/outlook-mcp
+
+runtime:
+  type: docker
+  image: outlook-mcp:latest
+  buildContext: .
+  transport: stdio
+  ports:
+    - container: 3333
+      host: 3333
+      description: OAuth callback server for Microsoft login
+
+auth:
+  type: oauth2
+  description: >
+    Microsoft OAuth 2.0 via Azure AD. Requires app registration in
+    Azure Portal with redirect URI http://localhost:3333/auth/callback.
+    The `authenticate` MCP tool runs the flow in-process: it starts a
+    temporary callback server on port 3333 and returns the Microsoft
+    sign-in URL. No separate auth server is needed.
+  oauth:
+    provider: microsoft
+    authUrl: https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/authorize
+    tokenUrl: https://login.microsoftonline.com/${MS_TENANT_ID}/oauth2/v2.0/token
+    callbackPort: 3333
+    callbackPath: /auth/callback
+    scopes:
+      - offline_access
+      - User.Read
+      - Mail.Read
+      - Mail.ReadWrite
+      - Mail.Send
+      - Calendars.Read
+      - Calendars.ReadWrite
+      - Files.Read
+      - Files.ReadWrite
+      - Contacts.Read
+      # Must match DEFAULT_SCOPES in config.js — the single scope list used
+      # for both the authorize request and token refresh.
+
+env:
+  required:
+    - name: OUTLOOK_CLIENT_ID
+      description: Azure app registration client ID
+      type: secret
+      aliases: [MS_CLIENT_ID]
+    - name: OUTLOOK_CLIENT_SECRET
+      description: Azure app registration client secret
+      type: secret
+      aliases: [MS_CLIENT_SECRET]
+
+  credentials: []
+
+  optional:
+    - name: MS_TENANT_ID
+      description: Azure AD tenant ID (use "common" for multi-tenant)
+      type: string
+      default: common
+    - name: OUTLOOK_TIMEZONE
+      description: IANA timezone for date display
+      type: string
+      default: Europe/Oslo
+    - name: USE_TEST_MODE
+      description: Enable mock data instead of real API calls
+      type: boolean
+      default: false
+
+# All files under managedPath are stored by mcp-director.
+# mcp-director resolves managedPath to ~/.mcp-director/data/<server-id>/
+# and creates volume mounts automatically.
+files:
+  - name: oauth-tokens
+    containerPath: /home/nodejs/.outlook-mcp-tokens.json
+    managedPath: outlook/tokens.json
+    description: OAuth tokens (access + refresh)
+    mode: rw
+    format: json
+    createdBy: auth
+
+authCommands:
+  - name: oauth-flow
+    command: node outlook-auth-server.js
+    description: >
+      Optional fallback: standalone OAuth callback server on port 3333
+      (user visits http://localhost:3333/auth to begin Microsoft login).
+      Normally unnecessary — the `authenticate` MCP tool runs the same
+      flow in-process. Tokens saved to tokens.json either way.
+    triggeredBy: manual
+    interactive: true

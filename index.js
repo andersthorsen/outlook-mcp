@@ -6,6 +6,10 @@
  * Microsoft 365 services (Outlook, OneDrive, Power Automate)
  * through the Microsoft Graph API and Flow API.
  */
+// Load .env before config so both the MCP server and the auth flow see the
+// same credentials regardless of how the server is launched.
+require('dotenv').config({ quiet: true });
+
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
 const config = require('./config');

@@ -5,10 +5,10 @@ const querystring = require('querystring');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
 
-// Load environment variables from .env file
-require('dotenv').config();
+// Load environment variables from .env file before reading config
+require('dotenv').config({ quiet: true });
+const { AUTH_CONFIG } = require('./config');
 
 // Log to console
 console.log('Starting Outlook Authentication Server');
@@ -36,24 +36,8 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref(); // unref so the timer doesn't prevent process exit
 
-// Authentication configuration
-const AUTH_CONFIG = {
-  clientId: process.env.MS_CLIENT_ID || '', // Set your client ID as an environment variable
-  clientSecret: process.env.MS_CLIENT_SECRET || '', // Set your client secret as an environment variable
-  tenantId: process.env.MS_TENANT_ID || 'common',
-  authorityHost: (process.env.MS_AUTHORITY_HOST || 'https://login.microsoftonline.com').replace(/\/+$/, ''),
-  redirectUri: 'http://localhost:3333/auth/callback',
-  scopes: [
-    'offline_access',
-    'User.Read',
-    'Mail.Read',
-    'Mail.Send',
-    'Calendars.Read',
-    'Calendars.ReadWrite',
-    'Contacts.Read'
-  ],
-  tokenStorePath: path.join(process.env.HOME || process.env.USERPROFILE, '.outlook-mcp-tokens.json')
-};
+// Authentication configuration is shared with the MCP server (config.js):
+// same client credentials, scopes, redirect URI, and token store path.
 
 // Create HTTP server
 const server = http.createServer((req, res) => {
@@ -226,7 +210,7 @@ const server = http.createServer((req, res) => {
       state
     };
     
-    const authUrl = `${AUTH_CONFIG.authorityHost}/${AUTH_CONFIG.tenantId}/oauth2/v2.0/authorize?${querystring.stringify(authParams)}`;
+    const authUrl = `${AUTH_CONFIG.authEndpoint}?${querystring.stringify(authParams)}`;
     console.log(`Redirecting to: ${authUrl}`);
     
     // Redirect to Microsoft's login page
@@ -276,16 +260,14 @@ function exchangeCodeForTokens(code) {
     });
     
     const options = {
-      hostname: AUTH_CONFIG.authorityHost.replace(/^https?:\/\//, '').split('/')[0],
-      path: `/${AUTH_CONFIG.tenantId}/oauth2/v2.0/token`,
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(postData)
       }
     };
-    
-    const req = https.request(options, (res) => {
+
+    const req = https.request(AUTH_CONFIG.tokenEndpoint, options, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
@@ -327,15 +309,14 @@ function exchangeCodeForTokens(code) {
 }
 
 // Start server
-const PORT = 3333;
-server.listen(PORT, () => {
-  console.log(`Authentication server running at http://localhost:${PORT}`);
+server.listen(AUTH_CONFIG.authPort, () => {
+  console.log(`Authentication server running at http://localhost:${AUTH_CONFIG.authPort}`);
   console.log(`Waiting for authentication callback at ${AUTH_CONFIG.redirectUri}`);
   console.log(`Token will be stored at: ${AUTH_CONFIG.tokenStorePath}`);
-  
+
   if (!AUTH_CONFIG.clientId || !AUTH_CONFIG.clientSecret) {
     console.log('\n⚠️  WARNING: Microsoft Graph API credentials are not set.');
-    console.log('   Please set the MS_CLIENT_ID and MS_CLIENT_SECRET environment variables.');
+    console.log('   Please set MS_CLIENT_ID and MS_CLIENT_SECRET (or OUTLOOK_CLIENT_ID and OUTLOOK_CLIENT_SECRET).');
   }
 });
 
